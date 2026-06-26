@@ -28,7 +28,7 @@
 </head>
 <body>
     <div id="controls">
-        <button id="startBtn" disabled>로딩 중...</button>
+        <button id="startBtn" disabled>물리 엔진 초기화 중...</button>
         <div id="info">파란색: 남자(8명) / 빨간색: 여자(4명)</div>
     </div>
 
@@ -42,7 +42,6 @@
         const height = 1600; 
         const SPEED_MULT = 0.5; 
 
-        // 물리 엔진 및 맵 초기화
         function setupWorld(engine, seed, playerInfo = null) {
             Composite.clear(engine.world);
             Engine.clear(engine);
@@ -54,8 +53,8 @@
             bodies.push(Bodies.rectangle(width + 10, height/2, 20, height, { isStatic: true, render: { fillStyle: '#2c3e50' } }));
             bodies.push(Bodies.rectangle(width/2, height + 10, width, 20, { isStatic: true }));
 
-            bodies.push(Bodies.rectangle(120, 250, 300, 20, { isStatic: true, angle: 0.5, render: { fillStyle: '#34495e' } }));
-            bodies.push(Bodies.rectangle(480, 250, 300, 20, { isStatic: true, angle: -0.5, render: { fillStyle: '#34495e' } }));
+            bodies.push(Bodies.rectangle(90, 250, 300, 20, { isStatic: true, angle: 0.5, render: { fillStyle: '#34495e' } }));
+            bodies.push(Bodies.rectangle(510, 250, 300, 20, { isStatic: true, angle: -0.5, render: { fillStyle: '#34495e' } }));
 
             const spinners = [
                 Bodies.rectangle(200, 450, 140, 15, { isStatic: true, angle: 0, render: { fillStyle: '#e67e22' } }),
@@ -64,11 +63,10 @@
             ];
             bodies.push(...spinners);
 
-            bodies.push(Bodies.rectangle(300, 950, 40, 150, { isStatic: true, render: { fillStyle: '#34495e' } }));
             for (let i = 0; i < 5; i++) {
                 for (let j = 0; j < 6; j++) {
                     let x = j * 90 + 75;
-                    let y = i * 50 + 1100;
+                    let y = i * 50 + 1000; 
                     if (i % 2 === 1) x += 45;
                     if (x < width - 30) {
                         bodies.push(Bodies.circle(x, y, 6, { isStatic: true, render: { fillStyle: '#7f8c8d' } }));
@@ -77,6 +75,8 @@
             }
 
             bodies.push(Bodies.rectangle(300, height - 100, 16, 200, { isStatic: true, render: { fillStyle: '#2c3e50' } }));
+            bodies.push(Bodies.circle(300, height - 200, 8, { isStatic: true, render: { fillStyle: '#2c3e50' } }));
+
             const teamA_Sensor = Bodies.rectangle(150, height - 20, 260, 40, { 
                 isStatic: true, isSensor: true, label: 'teamA', render: { fillStyle: '#2980b9', opacity: 0.4 } 
             });
@@ -88,8 +88,10 @@
 
             const players = [];
             for(let i = 0; i < 12; i++) {
-                let xPos = 200 + (i * 18) + (Common.random() * 4 - 2); 
-                let yPos = 30 - (Math.floor(i/4) * 45); 
+                let col = i % 4;
+                let row = Math.floor(i / 4);
+                let xPos = 240 + (col * 40) + (Common.random() * 4 - 2); 
+                let yPos = 30 - (row * 40); 
                 
                 let info = playerInfo ? playerInfo[i] : { gender: 'M', name: '' };
                 let isMan = info.gender === 'M';
@@ -109,7 +111,6 @@
             return { spinners, players };
         }
 
-        // 배열 셔플 유틸리티
         function seededShuffle(array) {
             for (let i = array.length - 1; i > 0; i--) {
                 const j = Math.floor(Common.random() * (i + 1));
@@ -121,64 +122,67 @@
         let syncSeed = null;
         let entityConfig = []; 
 
-        // 물리 연산 동기화 세팅
         async function initializePhysics() {
             const startBtn = document.getElementById('startBtn');
             await new Promise(resolve => setTimeout(resolve, 100)); 
 
+            // 모바일 프리징을 막기 위해 엔진을 단 하나만 생성하여 재사용
+            const bgEngine = Engine.create();
+            bgEngine.timing.timeScale = SPEED_MULT;
+
             for(let seed = 1000; seed <= 5000; seed++) {
-                const tempEngine = Engine.create();
-                tempEngine.timing.timeScale = SPEED_MULT;
-                
-                const { spinners: tempSpinners, players } = setupWorld(tempEngine, seed); 
-                
-                Events.on(tempEngine, 'beforeUpdate', () => {
-                    Body.rotate(tempSpinners[0], 0.04 * SPEED_MULT);
-                    Body.rotate(tempSpinners[1], -0.04 * SPEED_MULT);
-                    Body.rotate(tempSpinners[2], 0.06 * SPEED_MULT);
-                });
+                // UI가 멈추지 않도록 매 사이클마다 권한 양보
+                startBtn.innerText = `동기화 중... (${seed - 999})`;
+                await new Promise(resolve => setTimeout(resolve, 0)); 
+
+                const { spinners: tempSpinners, players } = setupWorld(bgEngine, seed); 
 
                 let settled = false;
                 let frames = 0;
+                let maxFrames = 700; // 최대 연산 제한으로 무한루프 방지
                 
-                while (frames < 5000 && !settled) {
-                    Engine.update(tempEngine, 1000 / 60);
+                while (frames < maxFrames && !settled) {
+                    // 메모리 누수를 막기 위해 이벤트 리스너 대신 수동 회전 적용
+                    Body.rotate(tempSpinners[0], 0.04 * SPEED_MULT);
+                    Body.rotate(tempSpinners[1], -0.04 * SPEED_MULT);
+                    Body.rotate(tempSpinners[2], 0.06 * SPEED_MULT);
+
+                    Engine.update(bgEngine, 1000 / 60);
                     frames++;
+                    
                     let doneCount = 0;
                     for(let i=0; i<12; i++) {
-                        if (players[i].position.y > height - 150) doneCount++;
+                        if (players[i].position.y > 1300) doneCount++;
                     }
                     if (doneCount === 12) settled = true;
                 }
 
-                if (settled) {
-                    let aCount = 0, bCount = 0;
-                    let pathMap = [];
-                    for(let i=0; i<12; i++) {
-                        if(players[i].position.x < 300) { aCount++; pathMap.push('A'); }
-                        else { bCount++; pathMap.push('B'); }
-                    }
+                let aCount = 0, bCount = 0;
+                let pathMap = [];
+                for(let i=0; i<12; i++) {
+                    if(players[i].position.x < 300) { aCount++; pathMap.push('A'); }
+                    else { bCount++; pathMap.push('B'); }
+                }
 
-                    if(aCount === 6 && bCount === 6) {
-                        syncSeed = seed;
-                        Common._seed = syncSeed;
+                if(aCount === 6 && bCount === 6) {
+                    syncSeed = seed;
+                    Common._seed = syncSeed;
 
-                        const maleNames = seededShuffle(['준하', '태윤', '성현', '민우', '재용', '민근', '태환', '중규']);
-                        const femaleNames = seededShuffle(['지연', '혜란', '가현', '정윤']);
-                        
-                        let teamA = [], teamB = [];
-                        for(let i=0; i<4; i++) { teamA.push({gender: 'M', name: maleNames.pop()}); teamB.push({gender: 'M', name: maleNames.pop()}); }
-                        for(let i=0; i<2; i++) { teamA.push({gender: 'W', name: femaleNames.pop()}); teamB.push({gender: 'W', name: femaleNames.pop()}); }
-                        
-                        seededShuffle(teamA);
-                        seededShuffle(teamB);
-                        
-                        for(let i = 0; i < 12; i++) {
-                            if(pathMap[i] === 'A') entityConfig.push(teamA.pop());
-                            else entityConfig.push(teamB.pop());
-                        }
-                        break; 
+                    const maleNames = seededShuffle(['준하', '태윤', '성현', '민우', '재용', '민근', '태환', '중규']);
+                    const femaleNames = seededShuffle(['지연', '혜란', '가현', '정윤']);
+                    
+                    let teamA = [], teamB = [];
+                    for(let i=0; i<4; i++) { teamA.push({gender: 'M', name: maleNames.pop()}); teamB.push({gender: 'M', name: maleNames.pop()}); }
+                    for(let i=0; i<2; i++) { teamA.push({gender: 'W', name: femaleNames.pop()}); teamB.push({gender: 'W', name: femaleNames.pop()}); }
+                    
+                    seededShuffle(teamA);
+                    seededShuffle(teamB);
+                    
+                    for(let i = 0; i < 12; i++) {
+                        if(pathMap[i] === 'A') entityConfig.push(teamA.pop());
+                        else entityConfig.push(teamB.pop());
                     }
+                    break; 
                 }
             }
 
@@ -190,7 +194,6 @@
             }
         }
 
-        // 메인 렌더링 세팅
         const realEngine = Engine.create();
         realEngine.timing.timeScale = SPEED_MULT;
         const runner = Runner.create({ isFixed: true, delta: 1000 / 60 });
@@ -223,7 +226,6 @@
             }
         });
 
-        // 텍스트 및 이펙트 렌더링
         Events.on(render, 'afterRender', () => {
             const context = render.context;
             const bodies = Composite.allBodies(realEngine.world);
