@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>팀 나누기 룰렛</title>
+    <style>
+        body { 
+            margin: 0; padding: 0; 
+            background-color: #111; color: white; 
+            display: flex; flex-direction: column; align-items: center; 
+            font-family: sans-serif; overflow: hidden;
+        }
+        #controls { 
+            position: fixed; top: 10px; z-index: 10;
+            background: rgba(0,0,0,0.7); padding: 10px; border-radius: 8px; text-align: center;
+        }
+        button { 
+            padding: 12px 24px; font-size: 16px; font-weight: bold;
+            cursor: pointer; background-color: #f1c40f; 
+            border: none; border-radius: 6px; color: #111; transition: 0.3s;
+        }
+        button:disabled { background-color: #7f8c8d; cursor: not-allowed; }
+        button:hover:not(:disabled) { background-color: #f39c12; }
+        canvas { display: block; box-shadow: 0 0 30px rgba(0,0,0,0.5); }
+        #info { margin-top: 8px; font-size: 12px; color: #bdc3c7; line-height: 1.4; }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <button id="startBtn" disabled>로딩 중...</button>
+        <div id="info">파란색: 남자(8명) / 빨간색: 여자(4명)</div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+
+    <script>
+        const { Engine, Render, Runner, Bodies, Composite, Events, Common, Body } = Matter;
+
+        const width = 600;
+        const height = 1600; 
+        const SPEED_MULT = 0.5; 
+
+        // 물리 엔진 및 맵 초기화
+        function setupWorld(engine, seed, playerInfo = null) {
+            Composite.clear(engine.world);
+            Engine.clear(engine);
+            Common._seed = seed;
+
+            const bodies = [];
+            
+            bodies.push(Bodies.rectangle(-10, height/2, 20, height, { isStatic: true, render: { fillStyle: '#2c3e50' } }));
+            bodies.push(Bodies.rectangle(width + 10, height/2, 20, height, { isStatic: true, render: { fillStyle: '#2c3e50' } }));
+            bodies.push(Bodies.rectangle(width/2, height + 10, width, 20, { isStatic: true }));
+
+            bodies.push(Bodies.rectangle(120, 250, 300, 20, { isStatic: true, angle: 0.5, render: { fillStyle: '#34495e' } }));
+            bodies.push(Bodies.rectangle(480, 250, 300, 20, { isStatic: true, angle: -0.5, render: { fillStyle: '#34495e' } }));
+
+            const spinners = [
+                Bodies.rectangle(200, 450, 140, 15, { isStatic: true, angle: 0, render: { fillStyle: '#e67e22' } }),
+                Bodies.rectangle(400, 450, 140, 15, { isStatic: true, angle: 0, render: { fillStyle: '#e67e22' } }),
+                Bodies.rectangle(300, 700, 180, 15, { isStatic: true, angle: 0, render: { fillStyle: '#e67e22' } })
+            ];
+            bodies.push(...spinners);
+
+            bodies.push(Bodies.rectangle(300, 950, 40, 150, { isStatic: true, render: { fillStyle: '#34495e' } }));
+            for (let i = 0; i < 5; i++) {
+                for (let j = 0; j < 6; j++) {
+                    let x = j * 90 + 75;
+                    let y = i * 50 + 1100;
+                    if (i % 2 === 1) x += 45;
+                    if (x < width - 30) {
+                        bodies.push(Bodies.circle(x, y, 6, { isStatic: true, render: { fillStyle: '#7f8c8d' } }));
+                    }
+                }
+            }
+
+            bodies.push(Bodies.rectangle(300, height - 100, 16, 200, { isStatic: true, render: { fillStyle: '#2c3e50' } }));
+            const teamA_Sensor = Bodies.rectangle(150, height - 20, 260, 40, { 
+                isStatic: true, isSensor: true, label: 'teamA', render: { fillStyle: '#2980b9', opacity: 0.4 } 
+            });
+            const teamB_Sensor = Bodies.rectangle(450, height - 20, 260, 40, { 
+                isStatic: true, isSensor: true, label: 'teamB', render: { fillStyle: '#27ae60', opacity: 0.4 } 
+            });
+            bodies.push(teamA_Sensor, teamB_Sensor);
+            Composite.add(engine.world, bodies);
+
+            const players = [];
+            for(let i = 0; i < 12; i++) {
+                let col = i % 4;
+                let row = Math.floor(i / 4);
+                let xPos = 240 + (col * 40) + (Common.random() * 4 - 2); 
+                let yPos = 30 - (row * 40); 
+                
+                let info = playerInfo ? playerInfo[i] : { gender: 'M', name: '' };
+                let isMan = info.gender === 'M';
+                
+                let ball = Bodies.circle(xPos, yPos, 16, { 
+                    label: 'player', 
+                    restitution: 0.6, friction: 0.02, density: 0.03,
+                    render: { fillStyle: playerInfo ? (isMan ? '#3498db' : '#e74c3c') : '#7f8c8d' }
+                });
+                
+                ball.playerName = info.name;
+                ball.isCaptain = false;
+                players.push(ball);
+            }
+            if (playerInfo) Composite.add(engine.world, players);
+
+            return { spinners, players };
+        }
+
+        // 배열 셔플 유틸리티
+        function seededShuffle(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Common.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+            return array;
+        }
+
+        let syncSeed = null;
+        let entityConfig = []; 
+
+        // 물리 연산 동기화 세팅
+        async function initializePhysics() {
+            const startBtn = document.getElementById('startBtn');
+            await new Promise(resolve => setTimeout(resolve, 100)); 
+
+            for(let seed = 1000; seed <= 5000; seed++) {
+                if (seed % 20 === 0) await new Promise(resolve => setTimeout(resolve, 0)); 
+
+                const tempEngine = Engine.create();
+                tempEngine.timing.timeScale = SPEED_MULT;
+                
+                const { spinners: tempSpinners, players } = setupWorld(tempEngine, seed); 
+                
+                Events.on(tempEngine, 'beforeUpdate', () => {
+                    Body.rotate(tempSpinners[0], 0.04 * SPEED_MULT);
+                    Body.rotate(tempSpinners[1], -0.04 * SPEED_MULT);
+                    Body.rotate(tempSpinners[2], 0.06 * SPEED_MULT);
+                });
+
+                let settled = false;
+                let frames = 0;
+                
+                while (frames < 5000 && !settled) {
+                    Engine.update(tempEngine, 1000 / 60);
+                    frames++;
+                    let doneCount = 0;
+                    for(let i=0; i<12; i++) {
+                        if (players[i].position.y > height - 150) doneCount++;
+                    }
+                    if (doneCount === 12) settled = true;
+                }
+
+                if (settled) {
+                    let aCount = 0, bCount = 0;
+                    let pathMap = [];
+                    for(let i=0; i<12; i++) {
+                        if(players[i].position.x < 300) { aCount++; pathMap.push('A'); }
+                        else { bCount++; pathMap.push('B'); }
+                    }
+
+                    if(aCount === 6 && bCount === 6) {
+                        syncSeed = seed;
+                        Common._seed = syncSeed;
+
+                        const maleNames = seededShuffle(['준하', '태윤', '성현', '민우', '재용', '민근', '태환', '중규']);
+                        const femaleNames = seededShuffle(['지연', '혜란', '가현', '정윤']);
+                        
+                        let teamA = [], teamB = [];
+                        for(let i=0; i<4; i++) { teamA.push({gender: 'M', name: maleNames.pop()}); teamB.push({gender: 'M', name: maleNames.pop()}); }
+                        for(let i=0; i<2; i++) { teamA.push({gender: 'W', name: femaleNames.pop()}); teamB.push({gender: 'W', name: femaleNames.pop()}); }
+                        
+                        seededShuffle(teamA);
+                        seededShuffle(teamB);
+                        
+                        for(let i = 0; i < 12; i++) {
+                            if(pathMap[i] === 'A') entityConfig.push(teamA.pop());
+                            else entityConfig.push(teamB.pop());
+                        }
+                        break; 
+                    }
+                }
+            }
+
+            if (syncSeed) {
+                startBtn.innerText = '룰렛 시작!';
+                startBtn.disabled = false;
+            } else {
+                startBtn.innerText = '네트워크 오류 (새로고침)';
+            }
+        }
+
+        // 메인 렌더링 세팅
+        const realEngine = Engine.create();
+        realEngine.timing.timeScale = SPEED_MULT;
+        const runner = Runner.create({ isFixed: true, delta: 1000 / 60 });
+
+        const render = Render.create({
+            element: document.body, engine: realEngine,
+            options: { width: 600, height: 800, wireframes: false, background: '#1a1a24' }
+        });
+
+        let currentSpinners = setupWorld(realEngine, 9999).spinners; 
+
+        Render.run(render);
+        Runner.run(runner, realEngine);
+
+        Events.on(realEngine, 'beforeUpdate', () => {
+            if (currentSpinners.length === 3) {
+                Body.rotate(currentSpinners[0], 0.04 * SPEED_MULT);
+                Body.rotate(currentSpinners[1], -0.04 * SPEED_MULT);
+                Body.rotate(currentSpinners[2], 0.06 * SPEED_MULT);
+            }
+        });
+
+        Events.on(realEngine, 'afterUpdate', () => {
+            const balls = Composite.allBodies(realEngine.world).filter(b => b.label === 'player');
+            if (balls.length > 0) {
+                let lowestY = 0;
+                balls.forEach(ball => { if (ball.position.y > lowestY) lowestY = ball.position.y; });
+                let targetY = Math.max(400, Math.min(height - 400, lowestY + 100));
+                Render.lookAt(render, { min: { x: 0, y: targetY - 400 }, max: { x: 600, y: targetY + 400 } });
+            }
+        });
+
+        // 텍스트 및 이펙트 렌더링
+        Events.on(render, 'afterRender', () => {
+            const context = render.context;
+            const bodies = Composite.allBodies(realEngine.world);
+
+            context.font = "bold 13px 'Malgun Gothic', sans-serif";
+            context.textAlign = "center";
+            context.textBaseline = "middle";
+
+            bodies.forEach(body => {
+                if (body.label === 'player' && body.playerName) {
+                    context.fillStyle = "#ffffff";
+                    context.fillText(body.playerName, body.position.x, body.position.y);
+
+                    if (body.isCaptain) {
+                        context.font = "20px sans-serif";
+                        context.fillText("👑", body.position.x, body.position.y - 24);
+                        context.font = "bold 13px 'Malgun Gothic', sans-serif"; 
+                    }
+                }
+            });
+        });
+
+        let teamACaptainFound = false, teamBCaptainFound = false;
+
+        document.getElementById('startBtn').addEventListener('click', () => {
+            if (!syncSeed) return;
+            
+            teamACaptainFound = false;
+            teamBCaptainFound = false;
+            
+            const { spinners } = setupWorld(realEngine, syncSeed, entityConfig);
+            currentSpinners = spinners; 
+        });
+
+        Events.on(realEngine, 'collisionStart', (event) => {
+            event.pairs.forEach((pair) => {
+                const { bodyA, bodyB } = pair;
+                const player = bodyA.label === 'player' ? bodyA : (bodyB.label === 'player' ? bodyB : null);
+                const sensor = bodyA.isSensor ? bodyA : (bodyB.isSensor ? bodyB : null);
+
+                if (player && sensor) {
+                    if (sensor.label === 'teamA' && !teamACaptainFound) {
+                        teamACaptainFound = true;
+                        player.isCaptain = true; 
+                        triggerConfetti(0.25);
+                    } else if (sensor.label === 'teamB' && !teamBCaptainFound) {
+                        teamBCaptainFound = true;
+                        player.isCaptain = true;
+                        triggerConfetti(0.75);
+                    }
+                }
+            });
+        });
+
+        function triggerConfetti(xOrigin) {
+            if (typeof confetti === 'function') {
+                confetti({
+                    particleCount: 50, spread: 60, scalar: 0.8,
+                    origin: { x: xOrigin, y: 0.85 },
+                    colors: ['#f1c40f', '#ffffff', '#3498db', '#2ecc71'],
+                    zIndex: 1000, ticks: 120
+                });
+            }
+        }
+
+        window.onload = initializePhysics;
+    </script>
+</body>
+</html>
