@@ -88,10 +88,8 @@
 
             const players = [];
             for(let i = 0; i < 12; i++) {
-                let col = i % 4;
-                let row = Math.floor(i / 4);
-                let xPos = 240 + (col * 40) + (Common.random() * 4 - 2); 
-                let yPos = 30 - (row * 40); 
+                let xPos = 200 + (i * 18) + (Common.random() * 4 - 2); 
+                let yPos = 30 - (Math.floor(i/4) * 45); 
                 
                 let info = playerInfo ? playerInfo[i] : { gender: 'M', name: '' };
                 let isMan = info.gender === 'M';
@@ -129,8 +127,6 @@
             await new Promise(resolve => setTimeout(resolve, 100)); 
 
             for(let seed = 1000; seed <= 5000; seed++) {
-                if (seed % 20 === 0) await new Promise(resolve => setTimeout(resolve, 0)); 
-
                 const tempEngine = Engine.create();
                 tempEngine.timing.timeScale = SPEED_MULT;
                 
