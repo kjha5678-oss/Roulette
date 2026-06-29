@@ -28,7 +28,7 @@
 </head>
 <body>
     <div id="controls">
-        <button id="startBtn" disabled>게임 세팅 중...</button>
+        <button id="startBtn">룰렛 시작!</button>
         <div id="info">파란색: 남자(8명) / 빨간색: 여자(5명)</div>
     </div>
 
@@ -36,16 +36,28 @@
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
 
     <script>
-        const { Engine, Render, Runner, Bodies, Composite, Events, Common, Body } = Matter;
+        const { Engine, Render, Runner, Bodies, Composite, Events, Body } = Matter;
 
         const width = 600;
         const height = 1600; 
-        const SPEED_MULT = 0.6; // 0.6배속 적용
+        const SPEED_MULT = 0.6; // 속도는 0.6 유지
 
-        function setupWorld(engine, seed, playerInfo = null) {
-            Composite.clear(engine.world);
-            Engine.clear(engine);
-            Common._seed = seed;
+        const realEngine = Engine.create();
+        realEngine.timing.timeScale = SPEED_MULT;
+
+        const render = Render.create({
+            element: document.body, engine: realEngine,
+            options: { width: 600, height: 800, wireframes: false, background: '#1a1a24' }
+        });
+
+        let currentSpinners = [];
+        let teamACaptainFound = false;
+        let teamBCaptainFound = false;
+
+        // 맵 설계 (배경 시뮬레이션 삭제, 바로 그리기)
+        function setupWorld(playerConfig) {
+            Composite.clear(realEngine.world);
+            Engine.clear(realEngine);
 
             const bodies = [];
             
@@ -55,17 +67,17 @@
             bodies.push(Bodies.rectangle(width/2, height + 10, width, 20, { isStatic: true })); 
             bodies.push(Bodies.rectangle(width/2, -300, width, 20, { isStatic: true })); 
 
-            // 상단 진입로
+            // 진입로
             bodies.push(Bodies.rectangle(100, 200, 260, 20, { isStatic: true, angle: 0.4, render: { fillStyle: '#34495e' } }));
             bodies.push(Bodies.rectangle(500, 200, 260, 20, { isStatic: true, angle: -0.4, render: { fillStyle: '#34495e' } }));
 
             // 회전 막대
-            const spinners = [
+            currentSpinners = [
                 Bodies.rectangle(150, 450, 120, 15, { isStatic: true, angle: 0, render: { fillStyle: '#e67e22' } }),
                 Bodies.rectangle(450, 450, 120, 15, { isStatic: true, angle: 0, render: { fillStyle: '#e67e22' } }),
                 Bodies.rectangle(300, 650, 160, 15, { isStatic: true, angle: 0, render: { fillStyle: '#e67e22' } })
             ];
-            bodies.push(...spinners);
+            bodies.push(...currentSpinners);
 
             // 핀볼 지형
             for (let i = 0; i < 5; i++) {
@@ -79,7 +91,7 @@
                 }
             }
 
-            // 하단 중앙 분리벽
+            // 하단 분리벽
             bodies.push(Bodies.rectangle(300, 1400, 16, 500, { isStatic: true, render: { fillStyle: '#2c3e50' } }));
             bodies.push(Bodies.polygon(300, 1140, 3, 14, { isStatic: true, angle: -Math.PI / 2, render: { fillStyle: '#2c3e50' } }));
 
@@ -90,121 +102,77 @@
                 isStatic: true, isSensor: true, label: 'teamB', render: { fillStyle: '#27ae60', opacity: 0.4 } 
             });
             bodies.push(teamA_Sensor, teamB_Sensor);
-            Composite.add(engine.world, bodies);
+            Composite.add(realEngine.world, bodies);
 
+            // 공 13개 배치
             const players = [];
             for(let i = 0; i < 13; i++) {
-                let xPos = 120 + (i * 30) + (Common.random() * 10 - 5); 
-                let yPos = (i % 2 === 0 ? 30 : 80) + (Common.random() * 10 - 5); 
+                let xPos = 120 + (i * 30) + (Math.random() * 10 - 5); 
+                let yPos = (i % 2 === 0 ? 30 : 80) + (Math.random() * 10 - 5); 
                 
-                let info = playerInfo ? playerInfo[i] : { gender: 'M', name: '' };
+                let info = playerConfig ? playerConfig[i] : { gender: 'M', name: '', _tx: -1 };
                 let isMan = info.gender === 'M';
                 
                 let ball = Bodies.circle(xPos, yPos, 16, { 
                     label: 'player', 
                     restitution: 0.55, friction: 0.01, density: 0.04,
-                    render: { fillStyle: playerInfo ? (isMan ? '#3498db' : '#e74c3c') : '#7f8c8d' }
+                    render: { fillStyle: playerConfig ? (isMan ? '#3498db' : '#e74c3c') : '#7f8c8d' }
                 });
                 
                 ball.playerName = info.name;
                 ball.isCaptain = false;
+                // 위장 속성: _tx (0이면 왼쪽으로 유도, 1이면 오른쪽으로 유도)
+                ball._tx = info._tx; 
                 players.push(ball);
             }
-            if (playerInfo) Composite.add(engine.world, players);
-
-            return { spinners, players };
+            if (playerConfig) Composite.add(realEngine.world, players);
         }
 
-        function seededShuffle(array) {
+        // 일반 셔플 함수
+        function shuffleArray(array) {
             for (let i = array.length - 1; i > 0; i--) {
-                const j = Math.floor(Common.random() * (i + 1));
+                const j = Math.floor(Math.random() * (i + 1));
                 [array[i], array[j]] = [array[j], array[i]];
             }
             return array;
         }
 
-        let syncSeed = null;
-        let entityConfig = []; 
+        document.getElementById('startBtn').addEventListener('click', () => {
+            const btn = document.getElementById('startBtn');
+            btn.disabled = true;
+            btn.innerText = '룰렛 진행 중...';
 
-        async function initializePhysics() {
-            const startBtn = document.getElementById('startBtn');
-            await new Promise(resolve => setTimeout(resolve, 100)); 
+            teamACaptainFound = false;
+            teamBCaptainFound = false;
 
-            for(let seed = 1000; seed <= 2000; seed++) {
-                // UI가 버벅이지 않도록 살짝만 갱신
-                if (seed % 3 === 0) {
-                    startBtn.innerText = `세팅 중... (${seed - 999})`;
-                    await new Promise(resolve => setTimeout(resolve, 0)); 
-                }
-
-                // 매번 새 엔진을 파서 메모리와 충격량 찌꺼기 완벽 차단
-                const bgEngine = Engine.create({ enableSleeping: false }); 
-                bgEngine.timing.timeScale = SPEED_MULT;
-
-                const { spinners: tempSpinners, players } = setupWorld(bgEngine, seed); 
-
-                // ⭐️ 핵심: 공이 늦게 떨어지든 말든 1400프레임(약 14초 분량)만 묻지도 따지지도 않고 돌림
-                for (let f = 0; f < 1400; f++) {
-                    Body.rotate(tempSpinners[0], 0.04 * SPEED_MULT);
-                    Body.rotate(tempSpinners[1], -0.04 * SPEED_MULT);
-                    Body.rotate(tempSpinners[2], 0.06 * SPEED_MULT);
-                    Engine.update(bgEngine, 1000 / 60);
-                }
-
-                let aCount = 0, bCount = 0;
-                let pathMap = [];
-                // 1400프레임이 끝난 시점에서의 위치만 보고 바로 확정!
-                for(let i=0; i<13; i++) {
-                    if(players[i].position.x < 300) { aCount++; pathMap.push('A'); }
-                    else { bCount++; pathMap.push('B'); }
-                }
-
-                if((aCount === 6 && bCount === 7) || (aCount === 7 && bCount === 6)) {
-                    syncSeed = seed;
-                    Common._seed = syncSeed;
-
-                    const maleNames = seededShuffle(['준하', '태윤', '성현', '민우', '재용', '민근', '태환', '중규']);
-                    const femaleNames = seededShuffle(['지연', '혜란', '가현', '정윤', '예지']);
-                    
-                    let teamA = [], teamB = [];
-                    for(let i=0; i<4; i++) { teamA.push({gender: 'M', name: maleNames.pop()}); teamB.push({gender: 'M', name: maleNames.pop()}); }
-                    
-                    let aFemaleCount = (aCount === 6) ? 2 : 3;
-                    let bFemaleCount = (bCount === 6) ? 2 : 3;
-                    
-                    for(let i=0; i<aFemaleCount; i++) { teamA.push({gender: 'W', name: femaleNames.pop()}); }
-                    for(let i=0; i<bFemaleCount; i++) { teamB.push({gender: 'W', name: femaleNames.pop()}); }
-                    
-                    seededShuffle(teamA);
-                    seededShuffle(teamB);
-                    
-                    for(let i = 0; i < 13; i++) {
-                        if(pathMap[i] === 'A') entityConfig.push(teamA.pop());
-                        else entityConfig.push(teamB.pop());
-                    }
-                    break; 
-                }
+            // 1. 여기서 운명을 완벽하게 미리 결정합니다. (주작 로직)
+            const maleNames = shuffleArray(['준하', '태윤', '성현', '민우', '재용', '민근', '태환', '중규']);
+            const femaleNames = shuffleArray(['지연', '혜란', '가현', '정윤', '예지']);
+            
+            let teamA = [], teamB = [];
+            
+            // 남자는 무조건 4명씩 배정
+            for(let i=0; i<4; i++) { 
+                teamA.push({gender: 'M', name: maleNames.pop(), _tx: 0}); // _tx: 0은 A팀(왼쪽)
+                teamB.push({gender: 'M', name: maleNames.pop(), _tx: 1}); // _tx: 1은 B팀(오른쪽)
             }
-
-            if (syncSeed) {
-                startBtn.innerText = '룰렛 시작!';
-                startBtn.disabled = false;
-            } else {
-                startBtn.innerText = '오류: 새로고침 해주세요';
-            }
-        }
-
-        const realEngine = Engine.create();
-        realEngine.timing.timeScale = SPEED_MULT;
-        const runner = Runner.create({ isFixed: true, delta: 1000 / 60 });
-
-        const render = Render.create({
-            element: document.body, engine: realEngine,
-            options: { width: 600, height: 800, wireframes: false, background: '#1a1a24' }
+            
+            // 여자는 2명/3명 랜덤 배분
+            let aFemaleCount = (Math.random() > 0.5) ? 2 : 3;
+            let bFemaleCount = (aFemaleCount === 2) ? 3 : 2;
+            
+            for(let i=0; i<aFemaleCount; i++) { teamA.push({gender: 'W', name: femaleNames.pop(), _tx: 0}); }
+            for(let i=0; i<bFemaleCount; i++) { teamB.push({gender: 'W', name: femaleNames.pop(), _tx: 1}); }
+            
+            let finalConfig = shuffleArray([...teamA, ...teamB]);
+            
+            // 2. 결정된 명단으로 즉시 물리 엔진 세팅 및 드롭 시작
+            setupWorld(finalConfig);
         });
 
-        let currentSpinners = setupWorld(realEngine, 9999).spinners; 
-
+        // 물리 엔진 루프
+        const runner = Runner.create({ isFixed: true, delta: 1000 / 60 });
+        setupWorld(); // 처음 빈 화면 세팅
         Render.run(render);
         Runner.run(runner, realEngine);
 
@@ -214,8 +182,32 @@
                 Body.rotate(currentSpinners[1], -0.04 * SPEED_MULT);
                 Body.rotate(currentSpinners[2], 0.06 * SPEED_MULT);
             }
+
+            // ⭐️ 핵심 사기(?) 로직: 보이지 않는 바람(Vector Force)으로 각자의 운명으로 인도합니다.
+            const balls = Composite.allBodies(realEngine.world).filter(b => b.label === 'player');
+            balls.forEach(ball => {
+                if (ball.position.y > 300 && ball.position.y < 1140) {
+                    let fX = 0;
+                    // A팀(왼쪽) 가야 하는데 오른쪽에 치우쳐 있으면 왼쪽으로 끌어당김
+                    if (ball._tx === 0 && ball.position.x > 260) fX = -0.002;
+                    // B팀(오른쪽) 가야 하는데 왼쪽에 치우쳐 있으면 오른쪽으로 끌어당김
+                    else if (ball._tx === 1 && ball.position.x < 340) fX = 0.002;
+                    
+                    // 중앙 분리벽에 다가오면 자석의 힘을 4배로 강력하게 발동시켜 무조건 넘겨버림
+                    if (ball.position.y > 900) {
+                        if (ball._tx === 0 && ball.position.x > 295) fX = -0.008;
+                        if (ball._tx === 1 && ball.position.x < 305) fX = 0.008;
+                    }
+                    
+                    // 자연스러운 물리 연산처럼 보이도록 Body.applyForce 사용
+                    if (fX !== 0) {
+                        Body.applyForce(ball, ball.position, { x: fX, y: 0 });
+                    }
+                }
+            });
         });
 
+        // 카메라 스크롤
         Events.on(realEngine, 'afterUpdate', () => {
             const balls = Composite.allBodies(realEngine.world).filter(b => b.label === 'player');
             if (balls.length > 0) {
@@ -226,6 +218,7 @@
             }
         });
 
+        // 이름 및 왕관 렌더링
         Events.on(render, 'afterRender', () => {
             const context = render.context;
             const bodies = Composite.allBodies(realEngine.world);
@@ -251,18 +244,7 @@
             });
         });
 
-        let teamACaptainFound = false, teamBCaptainFound = false;
-
-        document.getElementById('startBtn').addEventListener('click', () => {
-            if (!syncSeed) return;
-            
-            teamACaptainFound = false;
-            teamBCaptainFound = false;
-            
-            const { spinners } = setupWorld(realEngine, syncSeed, entityConfig);
-            currentSpinners = spinners; 
-        });
-
+        // 도착 감지 및 폭죽
         Events.on(realEngine, 'collisionStart', (event) => {
             event.pairs.forEach((pair) => {
                 const { bodyA, bodyB } = pair;
@@ -274,14 +256,23 @@
                         teamACaptainFound = true;
                         player.isCaptain = true; 
                         triggerConfetti(0.25);
+                        checkEnd();
                     } else if (sensor.label === 'teamB' && !teamBCaptainFound) {
                         teamBCaptainFound = true;
                         player.isCaptain = true;
                         triggerConfetti(0.75);
+                        checkEnd();
                     }
                 }
             });
         });
+
+        function checkEnd() {
+            if (teamACaptainFound && teamBCaptainFound) {
+                const btn = document.getElementById('startBtn');
+                btn.innerText = '게임 종료 (다시 하려면 새로고침)';
+            }
+        }
 
         function triggerConfetti(xOrigin) {
             if (typeof confetti === 'function') {
@@ -293,8 +284,6 @@
                 });
             }
         }
-
-        window.onload = initializePhysics;
     </script>
 </body>
 </html>
