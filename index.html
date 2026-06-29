@@ -42,7 +42,6 @@
         const height = 1600; 
         const SPEED_MULT = 0.6; // 피드백 반영: 속도 0.6 
 
-        // 맵 설계 (끼임 현상 100% 제거)
         function setupWorld(engine, seed, playerInfo = null) {
             Composite.clear(engine.world);
             Engine.clear(engine);
@@ -56,11 +55,11 @@
             bodies.push(Bodies.rectangle(width/2, height + 10, width, 20, { isStatic: true })); 
             bodies.push(Bodies.rectangle(width/2, -300, width, 20, { isStatic: true })); 
 
-            // 진입로 (경사 완만하게)
+            // 진입로
             bodies.push(Bodies.rectangle(100, 200, 260, 20, { isStatic: true, angle: 0.4, render: { fillStyle: '#34495e' } }));
             bodies.push(Bodies.rectangle(500, 200, 260, 20, { isStatic: true, angle: -0.4, render: { fillStyle: '#34495e' } }));
 
-            // 회전 막대 (크기를 줄여 두 막대 사이의 틈을 180px로 대폭 확보 -> 끼임 원천 차단)
+            // 회전 막대
             const spinners = [
                 Bodies.rectangle(150, 450, 120, 15, { isStatic: true, angle: 0, render: { fillStyle: '#e67e22' } }),
                 Bodies.rectangle(450, 450, 120, 15, { isStatic: true, angle: 0, render: { fillStyle: '#e67e22' } }),
@@ -68,7 +67,7 @@
             ];
             bodies.push(...spinners);
 
-            // 핀볼 지형 (간격 대폭 넓힘)
+            // 핀볼 지형
             for (let i = 0; i < 5; i++) {
                 for (let j = 0; j < 6; j++) {
                     let x = j * 85 + 85;
@@ -93,19 +92,18 @@
             bodies.push(teamA_Sensor, teamB_Sensor);
             Composite.add(engine.world, bodies);
 
-            // 공 13개 생성
             const players = [];
             for(let i = 0; i < 13; i++) {
-                // 시작부터 가로로 넓게 분산시켜서 뭉침 방지
-                let xPos = 120 + (i * 30); 
-                let yPos = (i % 2 === 0) ? 30 : 80; 
+                // ⭐️ 핵심 수정: 지워버렸던 난수를 다시 추가하여 매 시뮬레이션마다 결과가 달라지도록 복구
+                let xPos = 120 + (i * 30) + (Common.random() * 10 - 5); 
+                let yPos = (i % 2 === 0 ? 30 : 80) + (Common.random() * 10 - 5); 
                 
                 let info = playerInfo ? playerInfo[i] : { gender: 'M', name: '' };
                 let isMan = info.gender === 'M';
                 
                 let ball = Bodies.circle(xPos, yPos, 16, { 
                     label: 'player', 
-                    restitution: 0.55, friction: 0.01, density: 0.04, // 튕김과 마찰 최적화
+                    restitution: 0.55, friction: 0.01, density: 0.04,
                     render: { fillStyle: playerInfo ? (isMan ? '#3498db' : '#e74c3c') : '#7f8c8d' }
                 });
                 
@@ -133,7 +131,13 @@
             const startBtn = document.getElementById('startBtn');
             await new Promise(resolve => setTimeout(resolve, 100)); 
 
-            for(let seed = 1000; seed <= 2000; seed++) {
+            for(let seed = 1000; seed <= 3000; seed++) {
+                if (seed % 10 === 0) {
+                    startBtn.innerText = `시뮬레이션 검증 중... (${seed - 990})`;
+                    await new Promise(resolve => setTimeout(resolve, 0)); 
+                }
+
+                // 메모리 누수 방지를 위해 매번 깔끔하게 엔진을 새로 생성
                 const bgEngine = Engine.create();
                 bgEngine.timing.timeScale = SPEED_MULT;
 
@@ -151,11 +155,10 @@
                     Engine.update(bgEngine, 1000 / 60);
                     frames++;
                     
-                    // 15프레임 단위로 위치 체크 (부하 최소화)
                     if (frames % 15 === 0) {
                         let doneCount = 0;
                         for(let i=0; i<13; i++) {
-                            if (players[i].position.y > 1180) doneCount++; // 분리벽 완벽 통과 기준
+                            if (players[i].position.y > 1180) doneCount++; 
                         }
                         if (doneCount === 13) {
                             settled = true;
@@ -164,7 +167,10 @@
                     }
                 }
 
-                if (!settled) continue; // 끼인 공이 혹시라도 있다면 즉시 폐기하고 다음 진행
+                if (!settled) {
+                    Engine.clear(bgEngine);
+                    continue; 
+                }
 
                 let aCount = 0, bCount = 0;
                 let pathMap = [];
@@ -197,12 +203,14 @@
                         if(pathMap[i] === 'A') entityConfig.push(teamA.pop());
                         else entityConfig.push(teamB.pop());
                     }
+                    Engine.clear(bgEngine);
                     break; // 완벽한 시드 발견! 탈출
                 }
+                Engine.clear(bgEngine);
             }
 
             if (syncSeed) {
-                startBtn.innerText = '룰렛 시작!';
+                startBtn.innerText = '게임 시작!';
                 startBtn.disabled = false;
             } else {
                 startBtn.innerText = '오류: 새로고침 해주세요';
