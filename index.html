@@ -40,24 +40,28 @@
 
         const width = 600;
         const height = 1600; 
-        const SPEED_MULT = 0.6; 
+        const SPEED_MULT = 0.6; // 피드백 반영: 속도 0.6 
 
         function setupWorld(engine, seed, playerInfo = null) {
-            Composite.clear(engine.world);
-            Engine.clear(engine);
+            // 엔진 초기화 뿐만 아니라 시드 고정
             Common._seed = seed;
 
             const bodies = [];
             
-            // 외곽 벽 (공이 위로 튀는 것을 막기 위해 높이를 여유 있게 설정)
+            // 외곽 벽 (공이 위로 튀는 폭발 버그를 막기 위해 천장 추가 및 높이 연장)
             bodies.push(Bodies.rectangle(-10, height/2, 20, height + 1000, { isStatic: true, render: { fillStyle: '#2c3e50' } }));
             bodies.push(Bodies.rectangle(width + 10, height/2, 20, height + 1000, { isStatic: true, render: { fillStyle: '#2c3e50' } }));
-            bodies.push(Bodies.rectangle(width/2, height + 10, width, 20, { isStatic: true }));
+            bodies.push(Bodies.rectangle(width/2, height + 10, width, 20, { isStatic: true })); // 바닥
+            bodies.push(Bodies.rectangle(width/2, -300, width, 20, { isStatic: true })); // ⭐️ 천장 (미아 방지)
 
-            // 깔때기(Funnel) 철거 -> 바로 회전 막대로 진입하여 교통체증 해소
+            // 깔때기
+            bodies.push(Bodies.rectangle(90, 200, 300, 20, { isStatic: true, angle: 0.5, render: { fillStyle: '#34495e' } }));
+            bodies.push(Bodies.rectangle(510, 200, 300, 20, { isStatic: true, angle: -0.5, render: { fillStyle: '#34495e' } }));
+
+            // 회전 막대
             const spinners = [
-                Bodies.rectangle(200, 350, 140, 15, { isStatic: true, angle: 0, render: { fillStyle: '#e67e22' } }),
-                Bodies.rectangle(400, 350, 140, 15, { isStatic: true, angle: 0, render: { fillStyle: '#e67e22' } }),
+                Bodies.rectangle(200, 400, 140, 15, { isStatic: true, angle: 0, render: { fillStyle: '#e67e22' } }),
+                Bodies.rectangle(400, 400, 140, 15, { isStatic: true, angle: 0, render: { fillStyle: '#e67e22' } }),
                 Bodies.rectangle(300, 600, 180, 15, { isStatic: true, angle: 0, render: { fillStyle: '#e67e22' } })
             ];
             bodies.push(...spinners);
@@ -74,7 +78,7 @@
                 }
             }
 
-            // 중앙 분리벽 및 지붕
+            // 중앙 분리벽 및 지붕 (공이 멈춰서 로딩 멈추는 것 방지)
             bodies.push(Bodies.rectangle(300, 1380, 16, 500, { isStatic: true, render: { fillStyle: '#2c3e50' } }));
             bodies.push(Bodies.polygon(300, 1120, 3, 14, { isStatic: true, angle: -Math.PI / 2, render: { fillStyle: '#2c3e50' } }));
 
@@ -90,9 +94,10 @@
 
             const players = [];
             for(let i = 0; i < 13; i++) {
-                // 교통체증을 막기 위해 13개의 공을 가로로 길게 지그재그 배치
-                let xPos = 140 + (i * 26) + (Common.random() * 2 - 1); 
-                let yPos = (i % 2 === 0) ? 20 : 70; 
+                let col = i % 4;
+                let row = Math.floor(i / 4);
+                let xPos = 240 + (col * 40) + (Common.random() * 4 - 2); 
+                let yPos = 30 - (row * 40); 
                 
                 let info = playerInfo ? playerInfo[i] : { gender: 'M', name: '' };
                 let isMan = info.gender === 'M';
@@ -127,20 +132,20 @@
             const startBtn = document.getElementById('startBtn');
             await new Promise(resolve => setTimeout(resolve, 100)); 
 
-            const bgEngine = Engine.create();
-            bgEngine.timing.timeScale = SPEED_MULT;
-
             for(let seed = 1000; seed <= 5000; seed++) {
-                // UI가 더 빠릿하게 갱신되도록 간격 조절
-                if (seed % 5 === 0) {
-                    startBtn.innerText = `로딩 중... (${seed - 999})`;
+                if (seed % 10 === 0) {
+                    startBtn.innerText = `운명 시뮬레이션 중... (${seed - 990})`;
                     await new Promise(resolve => setTimeout(resolve, 0)); 
                 }
 
-                const { spinners: tempSpinners, players } = setupWorld(bgEngine, seed); 
+                // ⭐️ 핵심 수정: 매번 엔진을 아예 새로 만들어서 이전 우주의 충격량 데이터 초기화 (폭발 방지)
+                const tempEngine = Engine.create();
+                tempEngine.timing.timeScale = SPEED_MULT;
+
+                const { spinners: tempSpinners, players } = setupWorld(tempEngine, seed); 
 
                 let frames = 0;
-                let maxFrames = 1500; 
+                let maxFrames = 3000; 
                 let settled = false;
                 
                 while (frames < maxFrames) {
@@ -148,19 +153,16 @@
                     Body.rotate(tempSpinners[1], -0.04 * SPEED_MULT);
                     Body.rotate(tempSpinners[2], 0.06 * SPEED_MULT);
 
-                    Engine.update(bgEngine, 1000 / 60);
+                    Engine.update(tempEngine, 1000 / 60);
                     frames++;
                     
-                    // 연산 부하를 줄이기 위해 20프레임마다 도착 확인
-                    if (frames % 20 === 0) {
-                        let doneCount = 0;
-                        for(let i=0; i<13; i++) {
-                            if (players[i].position.y > 1150) doneCount++;
-                        }
-                        if (doneCount === 13) {
-                            settled = true;
-                            break;
-                        }
+                    let doneCount = 0;
+                    for(let i=0; i<13; i++) {
+                        if (players[i].position.y > 1150) doneCount++;
+                    }
+                    if (doneCount === 13) {
+                        settled = true;
+                        break;
                     }
                 }
 
@@ -173,6 +175,7 @@
                     else { bCount++; pathMap.push('B'); }
                 }
 
+                // 6:7 또는 7:6 비율이면 즉시 채택!
                 if((aCount === 6 && bCount === 7) || (aCount === 7 && bCount === 6)) {
                     syncSeed = seed;
                     Common._seed = syncSeed;
@@ -181,6 +184,7 @@
                     const femaleNames = seededShuffle(['지연', '혜란', '가현', '정윤', '예지']);
                     
                     let teamA = [], teamB = [];
+                    // 남자는 무조건 4명 고정
                     for(let i=0; i<4; i++) { teamA.push({gender: 'M', name: maleNames.pop()}); teamB.push({gender: 'M', name: maleNames.pop()}); }
                     
                     let aFemaleCount = (aCount === 6) ? 2 : 3;
