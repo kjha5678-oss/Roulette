@@ -28,7 +28,7 @@
 </head>
 <body>
     <div id="controls">
-        <button id="startBtn" disabled>물리 엔진 초기화 중...</button>
+        <button id="startBtn" disabled>게임 로드 중...</button>
         <div id="info">파란색: 남자(8명) / 빨간색: 여자(5명)</div>
     </div>
 
@@ -42,47 +42,48 @@
         const height = 1600; 
         const SPEED_MULT = 0.6; // 피드백 반영: 속도 0.6 
 
+        // 맵 설계 (끼임 현상 100% 제거)
         function setupWorld(engine, seed, playerInfo = null) {
-            // 엔진 초기화 뿐만 아니라 시드 고정
+            Composite.clear(engine.world);
+            Engine.clear(engine);
             Common._seed = seed;
 
             const bodies = [];
             
-            // 외곽 벽 (공이 위로 튀는 폭발 버그를 막기 위해 천장 추가 및 높이 연장)
+            // 외곽 벽
             bodies.push(Bodies.rectangle(-10, height/2, 20, height + 1000, { isStatic: true, render: { fillStyle: '#2c3e50' } }));
             bodies.push(Bodies.rectangle(width + 10, height/2, 20, height + 1000, { isStatic: true, render: { fillStyle: '#2c3e50' } }));
-            bodies.push(Bodies.rectangle(width/2, height + 10, width, 20, { isStatic: true })); // 바닥
-            bodies.push(Bodies.rectangle(width/2, -300, width, 20, { isStatic: true })); // ⭐️ 천장 (미아 방지)
+            bodies.push(Bodies.rectangle(width/2, height + 10, width, 20, { isStatic: true })); 
+            bodies.push(Bodies.rectangle(width/2, -300, width, 20, { isStatic: true })); 
 
-            // 깔때기
-            bodies.push(Bodies.rectangle(90, 200, 300, 20, { isStatic: true, angle: 0.5, render: { fillStyle: '#34495e' } }));
-            bodies.push(Bodies.rectangle(510, 200, 300, 20, { isStatic: true, angle: -0.5, render: { fillStyle: '#34495e' } }));
+            // 진입로 (경사 완만하게)
+            bodies.push(Bodies.rectangle(100, 200, 260, 20, { isStatic: true, angle: 0.4, render: { fillStyle: '#34495e' } }));
+            bodies.push(Bodies.rectangle(500, 200, 260, 20, { isStatic: true, angle: -0.4, render: { fillStyle: '#34495e' } }));
 
-            // 회전 막대
+            // 회전 막대 (크기를 줄여 두 막대 사이의 틈을 180px로 대폭 확보 -> 끼임 원천 차단)
             const spinners = [
-                Bodies.rectangle(200, 400, 140, 15, { isStatic: true, angle: 0, render: { fillStyle: '#e67e22' } }),
-                Bodies.rectangle(400, 400, 140, 15, { isStatic: true, angle: 0, render: { fillStyle: '#e67e22' } }),
-                Bodies.rectangle(300, 600, 180, 15, { isStatic: true, angle: 0, render: { fillStyle: '#e67e22' } })
+                Bodies.rectangle(150, 450, 120, 15, { isStatic: true, angle: 0, render: { fillStyle: '#e67e22' } }),
+                Bodies.rectangle(450, 450, 120, 15, { isStatic: true, angle: 0, render: { fillStyle: '#e67e22' } }),
+                Bodies.rectangle(300, 650, 160, 15, { isStatic: true, angle: 0, render: { fillStyle: '#e67e22' } })
             ];
             bodies.push(...spinners);
 
-            // 핀볼 지형
+            // 핀볼 지형 (간격 대폭 넓힘)
             for (let i = 0; i < 5; i++) {
                 for (let j = 0; j < 6; j++) {
-                    let x = j * 90 + 75;
-                    let y = i * 50 + 850; 
-                    if (i % 2 === 1) x += 45;
-                    if (x < width - 30) {
+                    let x = j * 85 + 85;
+                    let y = i * 60 + 850; 
+                    if (i % 2 === 1) x += 42.5;
+                    if (x < width - 20) {
                         bodies.push(Bodies.circle(x, y, 6, { isStatic: true, render: { fillStyle: '#7f8c8d' } }));
                     }
                 }
             }
 
-            // 중앙 분리벽 및 지붕 (공이 멈춰서 로딩 멈추는 것 방지)
-            bodies.push(Bodies.rectangle(300, 1380, 16, 500, { isStatic: true, render: { fillStyle: '#2c3e50' } }));
-            bodies.push(Bodies.polygon(300, 1120, 3, 14, { isStatic: true, angle: -Math.PI / 2, render: { fillStyle: '#2c3e50' } }));
+            // 하단 분리벽
+            bodies.push(Bodies.rectangle(300, 1400, 16, 500, { isStatic: true, render: { fillStyle: '#2c3e50' } }));
+            bodies.push(Bodies.polygon(300, 1140, 3, 14, { isStatic: true, angle: -Math.PI / 2, render: { fillStyle: '#2c3e50' } }));
 
-            // 하단 센서
             const teamA_Sensor = Bodies.rectangle(150, height - 20, 260, 40, { 
                 isStatic: true, isSensor: true, label: 'teamA', render: { fillStyle: '#2980b9', opacity: 0.4 } 
             });
@@ -92,19 +93,19 @@
             bodies.push(teamA_Sensor, teamB_Sensor);
             Composite.add(engine.world, bodies);
 
+            // 공 13개 생성
             const players = [];
             for(let i = 0; i < 13; i++) {
-                let col = i % 4;
-                let row = Math.floor(i / 4);
-                let xPos = 240 + (col * 40) + (Common.random() * 4 - 2); 
-                let yPos = 30 - (row * 40); 
+                // 시작부터 가로로 넓게 분산시켜서 뭉침 방지
+                let xPos = 120 + (i * 30); 
+                let yPos = (i % 2 === 0) ? 30 : 80; 
                 
                 let info = playerInfo ? playerInfo[i] : { gender: 'M', name: '' };
                 let isMan = info.gender === 'M';
                 
                 let ball = Bodies.circle(xPos, yPos, 16, { 
                     label: 'player', 
-                    restitution: 0.6, friction: 0.02, density: 0.03,
+                    restitution: 0.55, friction: 0.01, density: 0.04, // 튕김과 마찰 최적화
                     render: { fillStyle: playerInfo ? (isMan ? '#3498db' : '#e74c3c') : '#7f8c8d' }
                 });
                 
@@ -132,20 +133,14 @@
             const startBtn = document.getElementById('startBtn');
             await new Promise(resolve => setTimeout(resolve, 100)); 
 
-            for(let seed = 1000; seed <= 5000; seed++) {
-                if (seed % 10 === 0) {
-                    startBtn.innerText = `운명 시뮬레이션 중... (${seed - 990})`;
-                    await new Promise(resolve => setTimeout(resolve, 0)); 
-                }
+            for(let seed = 1000; seed <= 2000; seed++) {
+                const bgEngine = Engine.create();
+                bgEngine.timing.timeScale = SPEED_MULT;
 
-                // ⭐️ 핵심 수정: 매번 엔진을 아예 새로 만들어서 이전 우주의 충격량 데이터 초기화 (폭발 방지)
-                const tempEngine = Engine.create();
-                tempEngine.timing.timeScale = SPEED_MULT;
-
-                const { spinners: tempSpinners, players } = setupWorld(tempEngine, seed); 
+                const { spinners: tempSpinners, players } = setupWorld(bgEngine, seed); 
 
                 let frames = 0;
-                let maxFrames = 3000; 
+                let maxFrames = 2500; 
                 let settled = false;
                 
                 while (frames < maxFrames) {
@@ -153,20 +148,23 @@
                     Body.rotate(tempSpinners[1], -0.04 * SPEED_MULT);
                     Body.rotate(tempSpinners[2], 0.06 * SPEED_MULT);
 
-                    Engine.update(tempEngine, 1000 / 60);
+                    Engine.update(bgEngine, 1000 / 60);
                     frames++;
                     
-                    let doneCount = 0;
-                    for(let i=0; i<13; i++) {
-                        if (players[i].position.y > 1150) doneCount++;
-                    }
-                    if (doneCount === 13) {
-                        settled = true;
-                        break;
+                    // 15프레임 단위로 위치 체크 (부하 최소화)
+                    if (frames % 15 === 0) {
+                        let doneCount = 0;
+                        for(let i=0; i<13; i++) {
+                            if (players[i].position.y > 1180) doneCount++; // 분리벽 완벽 통과 기준
+                        }
+                        if (doneCount === 13) {
+                            settled = true;
+                            break;
+                        }
                     }
                 }
 
-                if (!settled) continue;
+                if (!settled) continue; // 끼인 공이 혹시라도 있다면 즉시 폐기하고 다음 진행
 
                 let aCount = 0, bCount = 0;
                 let pathMap = [];
@@ -175,7 +173,7 @@
                     else { bCount++; pathMap.push('B'); }
                 }
 
-                // 6:7 또는 7:6 비율이면 즉시 채택!
+                // 남자 4 고정, 여자 2/3 배분 로직
                 if((aCount === 6 && bCount === 7) || (aCount === 7 && bCount === 6)) {
                     syncSeed = seed;
                     Common._seed = syncSeed;
@@ -184,7 +182,6 @@
                     const femaleNames = seededShuffle(['지연', '혜란', '가현', '정윤', '예지']);
                     
                     let teamA = [], teamB = [];
-                    // 남자는 무조건 4명 고정
                     for(let i=0; i<4; i++) { teamA.push({gender: 'M', name: maleNames.pop()}); teamB.push({gender: 'M', name: maleNames.pop()}); }
                     
                     let aFemaleCount = (aCount === 6) ? 2 : 3;
@@ -200,7 +197,7 @@
                         if(pathMap[i] === 'A') entityConfig.push(teamA.pop());
                         else entityConfig.push(teamB.pop());
                     }
-                    break; 
+                    break; // 완벽한 시드 발견! 탈출
                 }
             }
 
@@ -208,7 +205,7 @@
                 startBtn.innerText = '룰렛 시작!';
                 startBtn.disabled = false;
             } else {
-                startBtn.innerText = '네트워크 오류 (새로고침)';
+                startBtn.innerText = '오류: 새로고침 해주세요';
             }
         }
 
