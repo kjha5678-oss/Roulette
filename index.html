@@ -36,15 +36,11 @@
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
 
     <script>
-        const { Engine, Render, Runner, Bodies, Composite, Events, Common, Body } = Matter;
+        const { Engine, Render, Runner, Bodies, Composite, Events, Body } = Matter;
 
         const width = 600;
         const height = 1600; 
         const SPEED_MULT = 0.6; // 피드백 반영: 안정적인 0.6 배속
-
-        // ⭐️ 완벽하게 검증된 단 하나의 골든 시드 고정 (Math.random 제거)
-        const syncSeed = 1357; 
-        Common._seed = syncSeed;
 
         const realEngine = Engine.create();
         realEngine.timing.timeScale = SPEED_MULT;
@@ -58,40 +54,9 @@
         let teamACaptainFound = false;
         let teamBCaptainFound = false;
 
-        // 고정된 시드(1357)에서 공들의 물리적 최종 낙하 위치 테이블 (A=왼쪽, B=오른쪽)
-        // 이 궤적에 맞춰 명단을 역으로 고정 배치하여 무조건 남4여2 / 남4여3이 나오게 만듭니다.
-        const pathMapping = ['A', 'A', 'B', 'B', 'B', 'A', 'B', 'B', 'A', 'B', 'A', 'A', 'B'];
-
-        // 명단 데이터 사전 셋업 (새로고침해도 순서와 결과가 완벽하게 동기화되어 고정됨)
-        const maleNames = ['준하', '태윤', '성현', '민우', '재용', '민근', '태환', '중규'];
-        const femaleNames = ['지연', '혜란', '가현', '정윤', '예지'];
-        
-        let teamA_Pool = [
-            {gender: 'M', name: maleNames[0]}, {gender: 'M', name: maleNames[1]},
-            {gender: 'M', name: maleNames[2]}, {gender: 'M', name: maleNames[3]},
-            {gender: 'W', name: femaleNames[0]}, {gender: 'W', name: femaleNames[1]}
-        ]; // A팀: 남4, 여2 (총 6명)
-
-        let teamB_Pool = [
-            {gender: 'M', name: maleNames[4]}, {gender: 'M', name: maleNames[5]},
-            {gender: 'M', name: maleNames[6]}, {gender: 'M', name: maleNames[7]},
-            {gender: 'W', name: femaleNames[2]}, {gender: 'W', name: femaleNames[3]}, {gender: 'W', name: femaleNames[4]}
-        ]; // B팀: 남4, 여3 (총 7명)
-
-        // 궤적 지도(pathMapping)에 맞게 명단을 1대1로 정교하게 매칭하여 최종 배열 생성
-        const finalPlayersConfig = [];
-        for (let i = 0; i < 13; i++) {
-            if (pathMapping[i] === 'A') {
-                finalPlayersConfig.push(teamA_Pool.pop());
-            } else {
-                finalPlayersConfig.push(teamB_Pool.pop());
-            }
-        }
-
         function setupWorld(playerConfig = null) {
             Composite.clear(realEngine.world);
             Engine.clear(realEngine);
-            Common._seed = syncSeed; // 시드 재고정
 
             const bodies = [];
             
@@ -141,10 +106,10 @@
             // 공 13개 배치
             const players = [];
             for(let i = 0; i < 13; i++) {
-                let xPos = 125 + (i * 29) + (Common.random() * 4 - 2); 
-                let yPos = (i % 2 === 0 ? 30 : 75) + (Common.random() * 4 - 2); 
+                let xPos = 125 + (i * 29) + (Math.random() * 4 - 2); 
+                let yPos = (i % 2 === 0 ? 30 : 75) + (Math.random() * 4 - 2); 
                 
-                let info = playerConfig ? playerConfig[i] : { gender: 'M', name: '' };
+                let info = playerConfig ? playerConfig[i] : { gender: 'M', name: '', group: 'A' };
                 let isMan = info.gender === 'M';
                 
                 let ball = Bodies.circle(xPos, yPos, 16, { 
@@ -155,9 +120,19 @@
                 
                 ball.playerName = info.name;
                 ball.isCaptain = false;
+                ball.group = info.group; // 위장 속성: 'A'팀 타겟인지 'B'팀 타겟인지 기록
                 players.push(ball);
             }
             if (playerConfig) Composite.add(realEngine.world, players);
+        }
+
+        // 배열 셔플 유틸리티
+        function shuffleArray(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+            return array;
         }
 
         document.getElementById('startBtn').addEventListener('click', () => {
@@ -168,8 +143,30 @@
             teamACaptainFound = false;
             teamBCaptainFound = false;
 
-            // 이미 계산이 완벽하게 끝난 finalPlayersConfig 명단을 집어넣고 떨어뜨립니다.
-            setupWorld(finalPlayersConfig);
+            // 1. 클릭 즉시 남4여2 / 남4여3 명단을 완벽하게 선배정 조작합니다.
+            const maleNames = shuffleArray(['준하', '태윤', '성현', '민우', '재용', '민근', '태환', '중규']);
+            const femaleNames = shuffleArray(['지연', '혜란', '가현', '정윤', '예지']);
+            
+            let teamA = [], teamB = [];
+            
+            // 남자는 무조건 양 팀에 4명씩 똑같이 분배
+            for(let i=0; i<4; i++) { 
+                teamA.push({gender: 'M', name: maleNames.pop(), group: 'A'}); 
+                teamB.push({gender: 'M', name: maleNames.pop(), group: 'B'}); 
+            }
+            
+            // 여자는 2명 / 3명으로 랜덤 분배 결정
+            let aFemaleCount = (Math.random() > 0.5) ? 2 : 3;
+            let bFemaleCount = (aFemaleCount === 2) ? 3 : 2;
+            
+            for(let i=0; i<aFemaleCount; i++) { teamA.push({gender: 'W', name: femaleNames.pop(), group: 'A'}); }
+            for(let i=0; i<bFemaleCount; i++) { teamB.push({gender: 'W', name: femaleNames.pop(), group: 'B'}); }
+            
+            // 출발 위치를 섞어서 공들이 나오는 순서를 랜덤하게 위장
+            let finalConfig = shuffleArray([...teamA, ...teamB]);
+            
+            // 2. 주작된 명단 그대로 엔진 실행
+            setupWorld(finalConfig);
         });
 
         const runner = Runner.create({ isFixed: true, delta: 1000 / 60 });
@@ -183,8 +180,25 @@
                 Body.rotate(currentSpinners[1], -0.04 * SPEED_MULT);
                 Body.rotate(currentSpinners[2], 0.06 * SPEED_MULT);
             }
+
+            // ⭐️ 핵심 탈출 방지 로직: 중앙 갈림길(y > 1050) 직전에서 지정된 팀 방향으로 공간을 강제 재배치합니다.
+            // 눈으로 볼 때는 핀에 부딪혀 튕겨 나가는 것처럼 완벽하게 묘사됩니다.
+            const balls = Composite.allBodies(realEngine.world).filter(b => b.label === 'player');
+            balls.forEach(ball => {
+                if (ball.position.y > 1060 && ball.position.y < 1140) {
+                    if (ball.group === 'A' && ball.position.x >= 295) {
+                        Body.setPosition(ball, { x: 275, y: ball.position.y });
+                        Body.setVelocity(ball, { x: -3, y: ball.velocity.y });
+                    }
+                    if (ball.group === 'B' && ball.position.x <= 305) {
+                        Body.setPosition(ball, { x: 325, y: ball.position.y });
+                        Body.setVelocity(ball, { x: 3, y: ball.velocity.y });
+                    }
+                }
+            });
         });
 
+        // 카메라 팔로우
         Events.on(realEngine, 'afterUpdate', () => {
             const balls = Composite.allBodies(realEngine.world).filter(b => b.label === 'player');
             if (balls.length > 0) {
@@ -195,6 +209,7 @@
             }
         });
 
+        // 이름 및 왕관 그리기
         Events.on(render, 'afterRender', () => {
             const context = render.context;
             const bodies = Composite.allBodies(realEngine.world);
@@ -220,6 +235,7 @@
             });
         });
 
+        // 센서 감지 및 이펙트
         Events.on(realEngine, 'collisionStart', (event) => {
             event.pairs.forEach((pair) => {
                 const { bodyA, bodyB } = pair;
