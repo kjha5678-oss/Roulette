@@ -28,7 +28,7 @@
 </head>
 <body>
     <div id="controls">
-        <button id="startBtn" disabled>게임 로드 중...</button>
+        <button id="startBtn" disabled>게임 세팅 중...</button>
         <div id="info">파란색: 남자(8명) / 빨간색: 여자(5명)</div>
     </div>
 
@@ -40,7 +40,7 @@
 
         const width = 600;
         const height = 1600; 
-        const SPEED_MULT = 0.6; // 피드백 반영: 속도 0.6 
+        const SPEED_MULT = 0.6; // 0.6배속 적용
 
         function setupWorld(engine, seed, playerInfo = null) {
             Composite.clear(engine.world);
@@ -55,7 +55,7 @@
             bodies.push(Bodies.rectangle(width/2, height + 10, width, 20, { isStatic: true })); 
             bodies.push(Bodies.rectangle(width/2, -300, width, 20, { isStatic: true })); 
 
-            // 진입로
+            // 상단 진입로
             bodies.push(Bodies.rectangle(100, 200, 260, 20, { isStatic: true, angle: 0.4, render: { fillStyle: '#34495e' } }));
             bodies.push(Bodies.rectangle(500, 200, 260, 20, { isStatic: true, angle: -0.4, render: { fillStyle: '#34495e' } }));
 
@@ -79,7 +79,7 @@
                 }
             }
 
-            // 하단 분리벽
+            // 하단 중앙 분리벽
             bodies.push(Bodies.rectangle(300, 1400, 16, 500, { isStatic: true, render: { fillStyle: '#2c3e50' } }));
             bodies.push(Bodies.polygon(300, 1140, 3, 14, { isStatic: true, angle: -Math.PI / 2, render: { fillStyle: '#2c3e50' } }));
 
@@ -94,7 +94,6 @@
 
             const players = [];
             for(let i = 0; i < 13; i++) {
-                // ⭐️ 핵심 수정: 지워버렸던 난수를 다시 추가하여 매 시뮬레이션마다 결과가 달라지도록 복구
                 let xPos = 120 + (i * 30) + (Common.random() * 10 - 5); 
                 let yPos = (i % 2 === 0 ? 30 : 80) + (Common.random() * 10 - 5); 
                 
@@ -131,55 +130,35 @@
             const startBtn = document.getElementById('startBtn');
             await new Promise(resolve => setTimeout(resolve, 100)); 
 
-            for(let seed = 1000; seed <= 3000; seed++) {
-                if (seed % 10 === 0) {
-                    startBtn.innerText = `시뮬레이션 검증 중... (${seed - 990})`;
+            for(let seed = 1000; seed <= 2000; seed++) {
+                // UI가 버벅이지 않도록 살짝만 갱신
+                if (seed % 3 === 0) {
+                    startBtn.innerText = `세팅 중... (${seed - 999})`;
                     await new Promise(resolve => setTimeout(resolve, 0)); 
                 }
 
-                // 메모리 누수 방지를 위해 매번 깔끔하게 엔진을 새로 생성
-                const bgEngine = Engine.create();
+                // 매번 새 엔진을 파서 메모리와 충격량 찌꺼기 완벽 차단
+                const bgEngine = Engine.create({ enableSleeping: false }); 
                 bgEngine.timing.timeScale = SPEED_MULT;
 
                 const { spinners: tempSpinners, players } = setupWorld(bgEngine, seed); 
 
-                let frames = 0;
-                let maxFrames = 2500; 
-                let settled = false;
-                
-                while (frames < maxFrames) {
+                // ⭐️ 핵심: 공이 늦게 떨어지든 말든 1400프레임(약 14초 분량)만 묻지도 따지지도 않고 돌림
+                for (let f = 0; f < 1400; f++) {
                     Body.rotate(tempSpinners[0], 0.04 * SPEED_MULT);
                     Body.rotate(tempSpinners[1], -0.04 * SPEED_MULT);
                     Body.rotate(tempSpinners[2], 0.06 * SPEED_MULT);
-
                     Engine.update(bgEngine, 1000 / 60);
-                    frames++;
-                    
-                    if (frames % 15 === 0) {
-                        let doneCount = 0;
-                        for(let i=0; i<13; i++) {
-                            if (players[i].position.y > 1180) doneCount++; 
-                        }
-                        if (doneCount === 13) {
-                            settled = true;
-                            break;
-                        }
-                    }
-                }
-
-                if (!settled) {
-                    Engine.clear(bgEngine);
-                    continue; 
                 }
 
                 let aCount = 0, bCount = 0;
                 let pathMap = [];
+                // 1400프레임이 끝난 시점에서의 위치만 보고 바로 확정!
                 for(let i=0; i<13; i++) {
                     if(players[i].position.x < 300) { aCount++; pathMap.push('A'); }
                     else { bCount++; pathMap.push('B'); }
                 }
 
-                // 남자 4 고정, 여자 2/3 배분 로직
                 if((aCount === 6 && bCount === 7) || (aCount === 7 && bCount === 6)) {
                     syncSeed = seed;
                     Common._seed = syncSeed;
@@ -203,14 +182,12 @@
                         if(pathMap[i] === 'A') entityConfig.push(teamA.pop());
                         else entityConfig.push(teamB.pop());
                     }
-                    Engine.clear(bgEngine);
-                    break; // 완벽한 시드 발견! 탈출
+                    break; 
                 }
-                Engine.clear(bgEngine);
             }
 
             if (syncSeed) {
-                startBtn.innerText = '게임 시작!';
+                startBtn.innerText = '룰렛 시작!';
                 startBtn.disabled = false;
             } else {
                 startBtn.innerText = '오류: 새로고침 해주세요';
