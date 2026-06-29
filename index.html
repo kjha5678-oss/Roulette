@@ -40,7 +40,7 @@
 
         const width = 600;
         const height = 1600; 
-        const SPEED_MULT = 0.6; // 피드백 반영: 속도 0.6으로 조정
+        const SPEED_MULT = 0.6; // 피드백 반영: 속도 0.6 
 
         function setupWorld(engine, seed, playerInfo = null) {
             Composite.clear(engine.world);
@@ -74,7 +74,6 @@
                 }
             }
 
-            // 중앙 분리벽 (y=1400부터 시작됨)
             bodies.push(Bodies.rectangle(300, height - 100, 16, 200, { isStatic: true, render: { fillStyle: '#2c3e50' } }));
             bodies.push(Bodies.circle(300, height - 200, 8, { isStatic: true, render: { fillStyle: '#2c3e50' } }));
 
@@ -131,16 +130,19 @@
             bgEngine.timing.timeScale = SPEED_MULT;
 
             for(let seed = 1000; seed <= 5000; seed++) {
-                startBtn.innerText = `동기화 중... (${seed - 999})`;
-                await new Promise(resolve => setTimeout(resolve, 0)); 
+                // UI 프리징 해결: 매번 화면을 갱신하면 모바일에서 너무 느려지므로 20번에 한 번씩만 상태 업데이트
+                if (seed % 20 === 0) {
+                    startBtn.innerText = `동기화 중... (${seed - 999})`;
+                    await new Promise(resolve => setTimeout(resolve, 0)); 
+                }
 
                 const { spinners: tempSpinners, players } = setupWorld(bgEngine, seed); 
 
-                let settled = false;
                 let frames = 0;
-                let maxFrames = 1500; // 프레임 제한을 넉넉히 늘려서 끝까지 시뮬레이션
+                let maxFrames = 2500; // 속도가 0.6배로 줄었으므로 시뮬레이션 허용 시간을 넉넉하게 대폭 증가
+                let settled = false;
                 
-                while (frames < maxFrames && !settled) {
+                while (frames < maxFrames) {
                     Body.rotate(tempSpinners[0], 0.04 * SPEED_MULT);
                     Body.rotate(tempSpinners[1], -0.04 * SPEED_MULT);
                     Body.rotate(tempSpinners[2], 0.06 * SPEED_MULT);
@@ -150,14 +152,16 @@
                     
                     let doneCount = 0;
                     for(let i=0; i<13; i++) {
-                        // 공이 중앙 분리벽을 완전히 넘어서 바닥 가까이 도달했을 때만 인정 (예측 오류 방지)
                         if (players[i].position.y > 1450) doneCount++;
                     }
-                    if (doneCount === 13) settled = true;
+                    if (doneCount === 13) {
+                        settled = true;
+                        break;
+                    }
                 }
 
-                // 프레임 초과로 완전히 떨어지지 않은 공이 있다면 이 시드는 버리고 다음으로 넘어감
-                if (!settled) continue; 
+                // 지정된 시간 내에 공이 모두 내려오지 못한 시드는 안전하게 폐기
+                if (!settled) continue;
 
                 let aCount = 0, bCount = 0;
                 let pathMap = [];
@@ -174,7 +178,7 @@
                     const femaleNames = seededShuffle(['지연', '혜란', '가현', '정윤', '예지']);
                     
                     let teamA = [], teamB = [];
-                    // 남자는 각 팀에 무조건 4명 고정
+                    // 남자는 무조건 4명씩
                     for(let i=0; i<4; i++) { teamA.push({gender: 'M', name: maleNames.pop()}); teamB.push({gender: 'M', name: maleNames.pop()}); }
                     
                     let aFemaleCount = (aCount === 6) ? 2 : 3;
@@ -271,4 +275,38 @@
             currentSpinners = spinners; 
         });
 
-        Events.on(realEngine,
+        Events.on(realEngine, 'collisionStart', (event) => {
+            event.pairs.forEach((pair) => {
+                const { bodyA, bodyB } = pair;
+                const player = bodyA.label === 'player' ? bodyA : (bodyB.label === 'player' ? bodyB : null);
+                const sensor = bodyA.isSensor ? bodyA : (bodyB.isSensor ? bodyB : null);
+
+                if (player && sensor) {
+                    if (sensor.label === 'teamA' && !teamACaptainFound) {
+                        teamACaptainFound = true;
+                        player.isCaptain = true; 
+                        triggerConfetti(0.25);
+                    } else if (sensor.label === 'teamB' && !teamBCaptainFound) {
+                        teamBCaptainFound = true;
+                        player.isCaptain = true;
+                        triggerConfetti(0.75);
+                    }
+                }
+            });
+        });
+
+        function triggerConfetti(xOrigin) {
+            if (typeof confetti === 'function') {
+                confetti({
+                    particleCount: 50, spread: 60, scalar: 0.8,
+                    origin: { x: xOrigin, y: 0.85 },
+                    colors: ['#f1c40f', '#ffffff', '#3498db', '#2ecc71'],
+                    zIndex: 1000, ticks: 120
+                });
+            }
+        }
+
+        window.onload = initializePhysics;
+    </script>
+</body>
+</html>
