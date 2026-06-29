@@ -40,7 +40,7 @@
 
         const width = 600;
         const height = 1600; 
-        const SPEED_MULT = 0.75; // 속도 1.5배 증가 (기존 0.5 -> 0.75)
+        const SPEED_MULT = 0.6; // 피드백 반영: 속도 0.6으로 조정
 
         function setupWorld(engine, seed, playerInfo = null) {
             Composite.clear(engine.world);
@@ -74,6 +74,7 @@
                 }
             }
 
+            // 중앙 분리벽 (y=1400부터 시작됨)
             bodies.push(Bodies.rectangle(300, height - 100, 16, 200, { isStatic: true, render: { fillStyle: '#2c3e50' } }));
             bodies.push(Bodies.circle(300, height - 200, 8, { isStatic: true, render: { fillStyle: '#2c3e50' } }));
 
@@ -87,7 +88,6 @@
             Composite.add(engine.world, bodies);
 
             const players = [];
-            // 총 13명으로 증가
             for(let i = 0; i < 13; i++) {
                 let col = i % 4;
                 let row = Math.floor(i / 4);
@@ -138,7 +138,7 @@
 
                 let settled = false;
                 let frames = 0;
-                let maxFrames = 700; 
+                let maxFrames = 1500; // 프레임 제한을 넉넉히 늘려서 끝까지 시뮬레이션
                 
                 while (frames < maxFrames && !settled) {
                     Body.rotate(tempSpinners[0], 0.04 * SPEED_MULT);
@@ -150,10 +150,14 @@
                     
                     let doneCount = 0;
                     for(let i=0; i<13; i++) {
-                        if (players[i].position.y > 1300) doneCount++;
+                        // 공이 중앙 분리벽을 완전히 넘어서 바닥 가까이 도달했을 때만 인정 (예측 오류 방지)
+                        if (players[i].position.y > 1450) doneCount++;
                     }
                     if (doneCount === 13) settled = true;
                 }
+
+                // 프레임 초과로 완전히 떨어지지 않은 공이 있다면 이 시드는 버리고 다음으로 넘어감
+                if (!settled) continue; 
 
                 let aCount = 0, bCount = 0;
                 let pathMap = [];
@@ -162,20 +166,17 @@
                     else { bCount++; pathMap.push('B'); }
                 }
 
-                // 조건 변경: 6명 vs 7명 (어느 쪽이든 상관없음)
                 if((aCount === 6 && bCount === 7) || (aCount === 7 && bCount === 6)) {
                     syncSeed = seed;
                     Common._seed = syncSeed;
 
                     const maleNames = seededShuffle(['준하', '태윤', '성현', '민우', '재용', '민근', '태환', '중규']);
-                    // 예지 추가
                     const femaleNames = seededShuffle(['지연', '혜란', '가현', '정윤', '예지']);
                     
                     let teamA = [], teamB = [];
-                    // 남자는 무조건 각 팀에 4명씩
+                    // 남자는 각 팀에 무조건 4명 고정
                     for(let i=0; i<4; i++) { teamA.push({gender: 'M', name: maleNames.pop()}); teamB.push({gender: 'M', name: maleNames.pop()}); }
                     
-                    // 여자 배정: 해당 팀의 총 인원수에 맞춰서 2명 또는 3명 배분
                     let aFemaleCount = (aCount === 6) ? 2 : 3;
                     let bFemaleCount = (bCount === 6) ? 2 : 3;
                     
@@ -270,38 +271,4 @@
             currentSpinners = spinners; 
         });
 
-        Events.on(realEngine, 'collisionStart', (event) => {
-            event.pairs.forEach((pair) => {
-                const { bodyA, bodyB } = pair;
-                const player = bodyA.label === 'player' ? bodyA : (bodyB.label === 'player' ? bodyB : null);
-                const sensor = bodyA.isSensor ? bodyA : (bodyB.isSensor ? bodyB : null);
-
-                if (player && sensor) {
-                    if (sensor.label === 'teamA' && !teamACaptainFound) {
-                        teamACaptainFound = true;
-                        player.isCaptain = true; 
-                        triggerConfetti(0.25);
-                    } else if (sensor.label === 'teamB' && !teamBCaptainFound) {
-                        teamBCaptainFound = true;
-                        player.isCaptain = true;
-                        triggerConfetti(0.75);
-                    }
-                }
-            });
-        });
-
-        function triggerConfetti(xOrigin) {
-            if (typeof confetti === 'function') {
-                confetti({
-                    particleCount: 50, spread: 60, scalar: 0.8,
-                    origin: { x: xOrigin, y: 0.85 },
-                    colors: ['#f1c40f', '#ffffff', '#3498db', '#2ecc71'],
-                    zIndex: 1000, ticks: 120
-                });
-            }
-        }
-
-        window.onload = initializePhysics;
-    </script>
-</body>
-</html>
+        Events.on(realEngine,
