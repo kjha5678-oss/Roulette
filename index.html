@@ -126,12 +126,10 @@
             const startBtn = document.getElementById('startBtn');
             await new Promise(resolve => setTimeout(resolve, 100)); 
 
-            // 모바일 프리징을 막기 위해 엔진을 단 하나만 생성하여 재사용
             const bgEngine = Engine.create();
             bgEngine.timing.timeScale = SPEED_MULT;
 
             for(let seed = 1000; seed <= 5000; seed++) {
-                // UI가 멈추지 않도록 매 사이클마다 권한 양보
                 startBtn.innerText = `동기화 중... (${seed - 999})`;
                 await new Promise(resolve => setTimeout(resolve, 0)); 
 
@@ -139,10 +137,9 @@
 
                 let settled = false;
                 let frames = 0;
-                let maxFrames = 700; // 최대 연산 제한으로 무한루프 방지
+                let maxFrames = 700; 
                 
                 while (frames < maxFrames && !settled) {
-                    // 메모리 누수를 막기 위해 이벤트 리스너 대신 수동 회전 적용
                     Body.rotate(tempSpinners[0], 0.04 * SPEED_MULT);
                     Body.rotate(tempSpinners[1], -0.04 * SPEED_MULT);
                     Body.rotate(tempSpinners[2], 0.06 * SPEED_MULT);
@@ -236,12 +233,16 @@
 
             bodies.forEach(body => {
                 if (body.label === 'player' && body.playerName) {
+                    // 카메라 스크롤(bounds.min)에 맞춰서 텍스트 좌표를 완벽하게 보정!
+                    const screenX = body.position.x - render.bounds.min.x;
+                    const screenY = body.position.y - render.bounds.min.y;
+
                     context.fillStyle = "#ffffff";
-                    context.fillText(body.playerName, body.position.x, body.position.y);
+                    context.fillText(body.playerName, screenX, screenY);
 
                     if (body.isCaptain) {
                         context.font = "20px sans-serif";
-                        context.fillText("👑", body.position.x, body.position.y - 24);
+                        context.fillText("👑", screenX, screenY - 24);
                         context.font = "bold 13px 'Malgun Gothic', sans-serif"; 
                     }
                 }
